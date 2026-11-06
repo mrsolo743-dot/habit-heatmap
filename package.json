@@ -1,0 +1,21 @@
+{
+  "name": "habit-heatmap",
+  "version": "1.0.0",
+  "description": "Трекер привычек с тепловой картой в стиле GitHub. Чистый HTML/CSS/JS, без бэкенда.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "node scripts/serve.mjs 8080",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node --test \"tests/e2e/*.test.js\"",
+    "test:all": "node --test \"tests/**/*.test.js\"",
+    "screenshot": "node scripts/screenshot.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=21"
+  }
+}
