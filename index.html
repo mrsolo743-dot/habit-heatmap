@@ -26,6 +26,15 @@
       <form id="add-form" class="add-form" autocomplete="off">
         <input id="habit-name" name="name" type="text" maxlength="60" placeholder="Новая привычка, например «Читать 20 минут»" required>
         <input id="habit-color" name="color" type="color" value="#2f9e44" aria-label="Цвет">
+        <select id="habit-goal" name="goal" aria-label="Цель на неделю" title="Цель: сколько раз в неделю">
+          <option value="7" selected>каждый день</option>
+          <option value="6">6 раз в нед.</option>
+          <option value="5">5 раз в нед.</option>
+          <option value="4">4 раза в нед.</option>
+          <option value="3">3 раза в нед.</option>
+          <option value="2">2 раза в нед.</option>
+          <option value="1">1 раз в нед.</option>
+        </select>
         <button type="submit" class="btn primary">Добавить</button>
       </form>
       <p id="form-error" class="error" role="alert" hidden></p>
@@ -37,7 +46,10 @@
     <section class="panel map-panel" aria-labelledby="map-title">
       <div class="map-head">
         <h2 id="map-title">Тепловая карта</h2>
-        <select id="view-select" aria-label="Что показывать"></select>
+        <div class="map-controls">
+          <select id="view-select" aria-label="Что показывать"></select>
+          <select id="year-select" aria-label="Период"></select>
+        </div>
       </div>
       <div id="heatmap" class="heatmap"></div>
       <div class="legend" aria-hidden="true">
@@ -48,6 +60,36 @@
       <p class="muted hint" id="map-hint"></p>
 
       <div id="stats" class="stats"></div>
+
+      <section id="goal-panel" class="goal-panel" aria-labelledby="goal-title" hidden>
+        <div class="goal-head">
+          <h3 id="goal-title">Цель на неделю</h3>
+          <select id="goal-select" aria-label="Цель для выбранной привычки">
+            <option value="7">каждый день</option>
+            <option value="6">6 раз в неделю</option>
+            <option value="5">5 раз в неделю</option>
+            <option value="4">4 раза в неделю</option>
+            <option value="3">3 раза в неделю</option>
+            <option value="2">2 раза в неделю</option>
+            <option value="1">1 раз в неделю</option>
+          </select>
+        </div>
+        <div id="goal-progress" class="goal-progress"></div>
+        <div id="goal-stats" class="stats goal-stats"></div>
+      </section>
+
+      <div class="charts">
+        <div class="chart-box">
+          <h3 id="monthly-title">По месяцам</h3>
+          <div id="monthly" class="chart-wrap"></div>
+          <p id="monthly-note" class="muted chart-note"></p>
+        </div>
+        <div class="chart-box">
+          <h3 id="weekday-title">По дням недели</h3>
+          <div id="weekdays" class="chart-wrap"></div>
+          <p id="weekday-note" class="muted chart-note"></p>
+        </div>
+      </div>
 
       <h3>По неделям</h3>
       <div id="weekly" class="weekly"></div>

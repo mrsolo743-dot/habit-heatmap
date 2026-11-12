@@ -1,6 +1,6 @@
 {
   "name": "habit-heatmap",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Трекер привычек с тепловой картой в стиле GitHub. Чистый HTML/CSS/JS, без бэкенда.",
   "type": "module",
   "private": true,

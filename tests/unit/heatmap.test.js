@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGrid, levelFor } from '../../js/heatmap.js';
+import { buildGrid, buildYearGrid, levelFor } from '../../js/heatmap.js';
 import { demoState, seededRandom } from '../../js/demo.js';
 import { countsByDay } from '../../js/store.js';
 
@@ -62,10 +62,44 @@ test('демо-данные детерминированы и корректны
   const b = demoState('2026-11-06');
   assert.deepEqual(a, b);
   assert.equal(a.habits.length, 3);
+  assert.deepEqual(a.habits.map((h) => h.goal), [7, 4, 3]);
   const counts = countsByDay(a);
   assert.ok(Object.keys(counts).length > 100);
   assert.ok(Object.keys(counts).every((k) => k <= '2026-11-06'));
   const rnd = seededRandom(1);
   const v = rnd();
   assert.ok(v >= 0 && v < 1);
+});
+
+test('buildYearGrid покрывает календарный год целыми неделями', () => {
+  const grid = buildYearGrid({}, 2025, '2026-11-11');
+  // 1 января 2025 — среда, 31 декабря 2025 — среда
+  assert.equal(grid.start, '2024-12-30');
+  assert.equal(grid.end, '2026-01-04');
+  assert.equal(grid.columns.length, 53);
+  assert.equal(grid.year, 2025);
+  const cells = grid.columns.flat();
+  assert.equal(cells.filter((c) => !c.outside).length, 365);
+  assert.deepEqual(cells.filter((c) => c.outside).map((c) => c.key),
+    ['2024-12-30', '2024-12-31', '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04']);
+  assert.ok(cells.every((c) => !c.future), 'прошлый год целиком в прошлом');
+  assert.equal(grid.monthLabels[0].label, 'янв');
+  assert.equal(grid.monthLabels.at(-1).label, 'дек');
+});
+
+test('buildYearGrid: високосный год, будущие дни и отметки соседних лет', () => {
+  const counts = { '2023-12-31': 1, '2024-02-29': 1, '2025-01-01': 1 };
+  const grid = buildYearGrid(counts, 2024, '2024-06-15');
+  const cells = grid.columns.flat();
+  assert.equal(cells.filter((c) => !c.outside).length, 366);
+  const byKey = Object.fromEntries(cells.map((c) => [c.key, c]));
+  assert.equal(byKey['2024-02-29'].count, 1);
+  assert.equal(byKey['2024-02-29'].level, 4);
+  assert.equal(byKey['2025-01-01'].count, 0, 'отметки следующего года не попадают в сетку');
+  assert.equal(byKey['2024-06-16'].future, true);
+  assert.equal(byKey['2024-06-15'].future, false);
+  // 2026: 1 января — четверг, 31 декабря — четверг → 53 колонки
+  assert.equal(buildYearGrid({}, 2026, '2026-11-11').columns.length, 53);
+  // 2024 начинается в понедельник: первая колонка без «чужих» дней
+  assert.ok(buildYearGrid({}, 2024, '2026-01-01').columns[0].every((c) => !c.outside));
 });

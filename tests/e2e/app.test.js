@@ -40,8 +40,9 @@ afterEach(async () => {
   assert.deepEqual(errors, [], 'в консоли не должно быть ошибок');
 });
 
-async function addHabit(name) {
+async function addHabit(name, goal = null) {
   await page.fill('#habit-name', name);
+  if (goal) await page.selectOption('#habit-goal', String(goal));
   await page.click('#add-form button[type=submit]');
 }
 
@@ -167,6 +168,120 @@ test('XSS: название выводится как текст', async () => {
 test('мобильная ширина: нет горизонтальной прокрутки страницы', async () => {
   await page.setViewportSize({ width: 375, height: 800 });
   await page.click('#demo-btn');
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-  assert.equal(overflow, false);
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  assert.equal(await overflow(), false);
+  // календарный год шире экрана телефона — прокручивается сама карта, а не страница
+  await page.click('.habit .habit-name');
+  await page.selectOption('#year-select', '2026');
+  assert.equal(await overflow(), false);
+  const scrolled = await page.$eval('#heatmap', (el) => el.scrollLeft > 0);
+  assert.equal(scrolled, true, 'для текущего года карта прокручена к свежим неделям');
+});
+
+// ---------- Цели на неделю ----------
+
+test('цель задаётся при добавлении и видна в списке', async () => {
+  await addHabit('Спортзал', 3);
+  assert.equal(await page.textContent('.habit .goal-pill'), '0/3');
+  await page.click('.habit .check');
+  assert.equal(await page.textContent('.habit .goal-pill'), '1/3');
+  assert.equal(await page.locator('.habit .goal-pill.met').count(), 0);
+  // после добавления форма возвращается к цели по умолчанию — «каждый день»
+  assert.equal(await page.inputValue('#habit-goal'), '7');
+  await addHabit('Вода');
+  assert.equal(await page.locator('.habit .goal-pill').nth(1).textContent(), '0/7');
+});
+
+test('панель цели: прогресс недели, смена цели и сохранение', async () => {
+  await addHabit('Спортзал', 2);
+  assert.equal(await page.isVisible('#goal-panel'), false, 'в режиме «все привычки» панели нет');
+  await page.click('.habit .habit-name');
+  assert.equal(await page.isVisible('#goal-panel'), true);
+  assert.equal(await page.inputValue('#goal-select'), '2');
+  assert.equal(await page.locator('.goal-dot').count(), 2);
+  // 6 ноября — пятница: отмечаем среду и четверг, цель 2 выполнена
+  await page.click('.hm-cell[data-key="2026-11-04"]');
+  await page.click('.hm-cell[data-key="2026-11-05"]');
+  assert.equal(await page.locator('.goal-dot.done').count(), 2);
+  assert.match(await page.textContent('.goal-text'), /выполнена/);
+  assert.equal(await page.locator('.habit .goal-pill.met').count(), 1);
+  const goalStats = await page.locator('#goal-stats .stat-value').allTextContents();
+  assert.equal(goalStats[0], '1 нед.');
+
+  await page.selectOption('#goal-select', '5');
+  assert.equal(await page.textContent('.habit .goal-pill'), '2/5');
+  // пт, сб, вс — 3 дня, нужно ещё 3 раза: успеть можно
+  assert.match(await page.textContent('.goal-text'), /Осталось 3 раза за 3 дня/);
+  await page.reload();
+  assert.equal(await page.inputValue('#goal-select'), '5');
+  assert.equal(await page.textContent('.habit .goal-pill'), '2/5');
+});
+
+test('предупреждение, если цель недели уже не успеть', async () => {
+  await page.goto(`${base}?today=2026-11-08`); // воскресенье
+  await addHabit('Бассейн', 3);
+  await page.click('.habit .habit-name');
+  await page.click('.hm-cell[data-key="2026-11-07"]');
+  assert.match(await page.textContent('.goal-text'), /уже не успеть/);
+  assert.equal(await page.locator('.goal-text.late').count(), 1);
+});
+
+// ---------- Годы и графики ----------
+
+test('переключатель года показывает календарный год и запоминается', async () => {
+  await page.click('#demo-btn');
+  const years = await page.locator('#year-select option').evaluateAll((o) => o.map((x) => x.value));
+  assert.deepEqual(years, ['recent', '2026', '2025']);
+  await page.selectOption('#year-select', '2025');
+  assert.equal(await page.locator('.hm-cell[data-key="2025-01-01"]').count(), 1);
+  assert.equal(await page.locator('.hm-cell[data-key="2025-12-31"]').count(), 1);
+  // 2024-12-30 — понедельник той же недели, клетка есть, но скрыта
+  assert.equal(await page.locator('.hm-cell.outside[data-key="2024-12-30"]').isVisible(), false);
+  assert.equal(await page.textContent('#monthly-title'), 'По месяцам · 2025');
+  await page.reload();
+  assert.equal(await page.inputValue('#year-select'), '2025');
+  await page.selectOption('#year-select', 'recent');
+  assert.equal(await page.locator(`.hm-cell[data-key="${TODAY}"]`).count(), 1);
+});
+
+test('в календарном году можно редактировать историю привычки', async () => {
+  await addHabit('Бег');
+  await page.click('.habit .habit-name');
+  await page.selectOption('#year-select', '2026');
+  await page.click('.hm-cell[data-key="2026-02-14"]');
+  assert.equal(await page.getAttribute('.hm-cell[data-key="2026-02-14"]', 'data-count'), '1');
+  assert.equal(await page.locator('.hm-cell[data-key="2026-11-07"]').isDisabled(), true);
+});
+
+test('графики по месяцам и дням недели', async () => {
+  await page.click('#demo-btn');
+  assert.equal(await page.locator('#monthly .ch-bar').count(), 12);
+  assert.equal(await page.locator('#weekdays .ch-bar').count(), 7);
+  // декабрь 2026 ещё не наступил — заглушка без столбика
+  assert.equal(await page.locator('#monthly .ch-bar.empty').count(), 1);
+  assert.equal(await page.locator('#monthly .ch-bar.hl').count(), 1);
+  assert.match(await page.textContent('#monthly-note'), /Лучший месяц: .+ \(\d+%\), худший: .+/);
+  assert.match(await page.textContent('#weekday-note'), /Чаще всего/);
+  // подсказка у столбика
+  const title = await page.locator('#monthly .ch-bar title').first().textContent();
+  assert.match(title, /январь 2026: \d+ из \d+/);
+});
+
+test('данные старой версии (v1) мигрируют при запуске', async () => {
+  const v1 = {
+    version: 1,
+    habits: [{ id: 'old', name: 'Старая привычка', color: '#1971c2', createdAt: '2026-10-01' }],
+    checks: { old: ['2026-11-02', '2026-11-03'] },
+  };
+  await page.evaluate((data) => {
+    localStorage.clear();
+    localStorage.setItem('habit-heatmap:v1', JSON.stringify(data));
+  }, v1);
+  await page.reload();
+  assert.equal(await page.textContent('.habit .habit-name'), 'Старая привычка');
+  assert.equal(await page.textContent('.habit .goal-pill'), '2/7');
+  await page.click('.habit .check'); // любое изменение сохраняет уже v2
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('habit-heatmap:v2')));
+  assert.equal(saved.version, 2);
+  assert.equal(saved.habits[0].goal, 7);
 });

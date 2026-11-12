@@ -1,7 +1,7 @@
 // Построение сетки тепловой карты (как у GitHub): колонки — недели, строки — дни Пн..Вс.
 // buildGrid — чистая функция, renderHeatmap — отрисовка в DOM.
 
-import { addDays, startOfWeek, monthShort, formatKey, parseKey } from './dates.js';
+import { addDays, diffDays, startOfWeek, monthShort, formatKey, parseKey } from './dates.js';
 
 export const LEVELS = 4; // уровни 1..4 плюс 0 = пусто
 
@@ -20,8 +20,26 @@ export function levelFor(count, max) {
  */
 export function buildGrid(counts, endKey, weeks = 53, maxOverride = null) {
   const firstMonday = addDays(startOfWeek(endKey), -7 * (weeks - 1));
+  return layout(counts, { firstMonday, weeks, today: endKey, from: null, to: null, maxOverride });
+}
+
+/**
+ * Сетка за календарный год: с понедельника недели, где 1 января, до воскресенья недели,
+ * где 31 декабря. Дни соседних лет помечаются outside, дни после today — future.
+ */
+export function buildYearGrid(counts, year, today, maxOverride = null) {
+  const from = `${year}-01-01`;
+  const to = `${year}-12-31`;
+  const firstMonday = startOfWeek(from);
+  const weeks = diffDays(firstMonday, startOfWeek(to)) / 7 + 1;
+  return { ...layout(counts, { firstMonday, weeks, today, from, to, maxOverride }), year };
+}
+
+function layout(counts, { firstMonday, weeks, today, from, to, maxOverride }) {
   const lastDay = addDays(firstMonday, weeks * 7 - 1);
-  const visible = Object.entries(counts).filter(([k]) => k >= firstMonday && k <= endKey);
+  const lo = from ?? firstMonday;
+  const hi = to && to < today ? to : today;
+  const visible = Object.entries(counts).filter(([k]) => k >= lo && k <= hi);
   const max = maxOverride ?? Math.max(0, ...visible.map(([, v]) => v));
 
   const columns = [];
@@ -32,12 +50,13 @@ export function buildGrid(counts, endKey, weeks = 53, maxOverride = null) {
     const cells = [];
     for (let d = 0; d < 7; d += 1) {
       const key = addDays(monday, d);
-      const count = counts[key] ?? 0;
-      cells.push({ key, count, level: levelFor(count, max), future: key > endKey });
+      const outside = Boolean((from && key < from) || (to && key > to));
+      const count = outside ? 0 : counts[key] ?? 0;
+      cells.push({ key, count, level: levelFor(count, max), future: key > today, outside });
     }
     // Подпись месяца ставим на колонку, где встречается 1-е число (или на первую колонку).
-    const firstOfMonth = cells.find((c) => parseKey(c.key).getDate() === 1);
-    const labelKey = w === 0 ? monday : firstOfMonth?.key;
+    const firstOfMonth = cells.find((c) => !c.outside && parseKey(c.key).getDate() === 1);
+    const labelKey = w === 0 ? (from ?? monday) : firstOfMonth?.key;
     if (labelKey) {
       const month = monthShort(labelKey);
       if (month !== prevMonth) monthLabels.push({ week: w, label: month });
@@ -88,12 +107,19 @@ export function renderHeatmap(container, grid, { color = '#2f9e44', onCellClick,
     for (const cell of column) {
       const el = document.createElement('button');
       el.type = 'button';
-      el.className = `hm-cell lvl-${cell.level}${cell.future ? ' future' : ''}`;
+      el.className = `hm-cell lvl-${cell.level}${cell.future ? ' future' : ''}${cell.outside ? ' outside' : ''}`;
       el.dataset.key = cell.key;
       el.dataset.count = String(cell.count);
       el.title = titleFor ? titleFor(cell) : `${formatKey(cell.key)}: ${cell.count}`;
       el.setAttribute('aria-label', el.title);
-      if (cell.future) {
+      if (cell.outside) {
+        // Дни соседнего года: место в сетке сохраняем, но клетку прячем от мыши и дикторов.
+        el.disabled = true;
+        el.tabIndex = -1;
+        el.setAttribute('aria-hidden', 'true');
+        el.removeAttribute('title');
+        el.removeAttribute('aria-label');
+      } else if (cell.future) {
         el.disabled = true;
       } else if (onCellClick) {
         el.addEventListener('click', () => onCellClick(cell.key));

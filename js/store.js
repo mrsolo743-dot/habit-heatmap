@@ -3,13 +3,17 @@
 
 import { isValidKey, toKey } from './dates.js';
 
-export const SCHEMA_VERSION = 1;
-export const STORAGE_KEY = 'habit-heatmap:v1';
+export const SCHEMA_VERSION = 2;
+export const STORAGE_KEY = 'habit-heatmap:v2';
+/** Ключи прошлых версий: читаются, если нового ключа ещё нет (старые данные мигрируются). */
+export const LEGACY_STORAGE_KEYS = ['habit-heatmap:v1'];
 export const MAX_NAME_LENGTH = 60;
+/** Цель — сколько раз в неделю выполнять привычку. 7 = каждый день. */
+export const DEFAULT_GOAL = 7;
 export const PALETTE = ['#2f9e44', '#1971c2', '#e8590c', '#9c36b5', '#c2255c', '#0c8599'];
 
 /**
- * @typedef {{id: string, name: string, color: string, createdAt: string}} Habit
+ * @typedef {{id: string, name: string, color: string, createdAt: string, goal: number}} Habit
  * @typedef {{version: number, habits: Habit[], checks: Record<string, string[]>}} State
  */
 
@@ -36,6 +40,16 @@ function cleanColor(color) {
   return /^#[0-9a-f]{6}$/i.test(color ?? '') ? color.toLowerCase() : PALETTE[0];
 }
 
+/** Цель: целое 1..7. Пустое значение — цель по умолчанию, остальное — ошибка. */
+export function cleanGoal(goal) {
+  if (goal === undefined || goal === null || goal === '') return DEFAULT_GOAL;
+  const n = Number(goal);
+  if (!Number.isInteger(n) || n < 1 || n > 7) {
+    throw new Error('Цель должна быть от 1 до 7 раз в неделю');
+  }
+  return n;
+}
+
 function assertUniqueName(state, name, exceptId = null) {
   const lower = name.toLocaleLowerCase('ru');
   if (state.habits.some((h) => h.id !== exceptId && h.name.toLocaleLowerCase('ru') === lower)) {
@@ -44,7 +58,7 @@ function assertUniqueName(state, name, exceptId = null) {
 }
 
 /** Добавляет привычку. Возвращает { state, habit }. */
-export function addHabit(state, { name, color, createdAt, id = makeId() }) {
+export function addHabit(state, { name, color, createdAt, goal, id = makeId() }) {
   const clean = cleanName(name);
   assertUniqueName(state, clean);
   const habit = {
@@ -52,6 +66,7 @@ export function addHabit(state, { name, color, createdAt, id = makeId() }) {
     name: clean,
     color: cleanColor(color ?? PALETTE[state.habits.length % PALETTE.length]),
     createdAt: createdAt ?? toKey(new Date()),
+    goal: cleanGoal(goal),
   };
   return {
     state: { ...state, habits: [...state.habits, habit], checks: { ...state.checks, [id]: [] } },
@@ -59,7 +74,7 @@ export function addHabit(state, { name, color, createdAt, id = makeId() }) {
   };
 }
 
-export function updateHabit(state, id, { name, color }) {
+export function updateHabit(state, id, { name, color, goal }) {
   const habit = getHabit(state, id);
   const next = { ...habit };
   if (name !== undefined) {
@@ -67,6 +82,7 @@ export function updateHabit(state, id, { name, color }) {
     assertUniqueName(state, next.name, id);
   }
   if (color !== undefined) next.color = cleanColor(color);
+  if (goal !== undefined) next.goal = cleanGoal(goal);
   return { ...state, habits: state.habits.map((h) => (h.id === id ? next : h)) };
 }
 
@@ -135,11 +151,35 @@ export function importJSON(text) {
   return normalizeState(data);
 }
 
-export function normalizeState(data) {
+/**
+ * Миграции схемы: MIGRATIONS[n] переводит данные версии n в версию n + 1.
+ * Чтобы добавить версию 3, достаточно дописать MIGRATIONS[2] и поднять SCHEMA_VERSION.
+ */
+export const MIGRATIONS = {
+  // v1 → v2: у привычек появилась недельная цель. Старые привычки считаем ежедневными.
+  1: (data) => ({
+    ...data,
+    version: 2,
+    habits: Array.isArray(data.habits)
+      ? data.habits.map((h) => (h && typeof h === 'object' ? { goal: DEFAULT_GOAL, ...h } : h))
+      : data.habits,
+  }),
+};
+
+/** Доводит данные любой поддерживаемой версии до текущей. */
+export function migrate(data) {
   if (!data || typeof data !== 'object') throw new Error('Пустые или неверные данные');
-  if (data.version !== SCHEMA_VERSION) {
-    throw new Error(`Неподдерживаемая версия данных: ${data.version}`);
+  let current = data;
+  while (current.version !== SCHEMA_VERSION) {
+    const step = MIGRATIONS[current.version];
+    if (!step) throw new Error(`Неподдерживаемая версия данных: ${current.version}`);
+    current = step(current);
   }
+  return current;
+}
+
+export function normalizeState(input) {
+  const data = migrate(input);
   if (!Array.isArray(data.habits)) throw new Error('Поле habits должно быть массивом');
 
   let state = emptyState();
@@ -151,6 +191,7 @@ export function normalizeState(data) {
       name: raw.name,
       color: raw.color,
       createdAt: isValidKey(raw.createdAt) ? raw.createdAt : undefined,
+      goal: raw.goal,
     }));
     const days = data.checks?.[raw.id] ?? [];
     if (!Array.isArray(days)) throw new Error(`Отметки привычки «${raw.name}» должны быть массивом`);
@@ -168,8 +209,13 @@ export function createStorage(backend = globalThis.localStorage) {
   return {
     load() {
       try {
-        const raw = backend?.getItem(STORAGE_KEY);
-        return raw ? normalizeState(JSON.parse(raw)) : emptyState();
+        // Сначала текущий ключ, затем ключи старых версий. Старые данные не удаляем:
+        // они остаются резервной копией, а при первом сохранении появится ключ v2.
+        for (const key of [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) {
+          const raw = backend?.getItem(key);
+          if (raw) return normalizeState(JSON.parse(raw));
+        }
+        return emptyState();
       } catch (err) {
         console.warn('Не удалось прочитать сохранённые данные:', err.message);
         return emptyState();

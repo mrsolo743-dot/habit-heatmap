@@ -17,18 +17,19 @@ export function seededRandom(seed) {
 }
 
 const DEMO = [
-  { name: 'Читать 20 минут', color: '#2f9e44', p: 0.78 },
-  { name: 'Зарядка', color: '#1971c2', p: 0.6 },
-  { name: 'Учить английский', color: '#e8590c', p: 0.5 },
+  { name: 'Читать 20 минут', color: '#2f9e44', p: 0.78, goal: 7 },
+  { name: 'Зарядка', color: '#1971c2', p: 0.6, goal: 4 },
+  { name: 'Учить английский', color: '#e8590c', p: 0.5, goal: 3 },
 ];
 
-export function demoState(today, days = 300, seed = 42) {
+// ~1,5 года истории, чтобы в переключателе было два года.
+export function demoState(today, days = 520, seed = 42) {
   const rnd = seededRandom(seed);
   let state = emptyState();
   const start = addDays(today, -(days - 1));
   DEMO.forEach((d, i) => {
     let habit;
-    ({ state, habit } = addHabit(state, { id: `demo_${i}`, name: d.name, color: d.color, createdAt: start }));
+    ({ state, habit } = addHabit(state, { id: `demo_${i}`, name: d.name, color: d.color, goal: d.goal, createdAt: start }));
     const keys = [];
     let mood = 1; // «полосы» хорошей и плохой мотивации, чтобы карта выглядела живо
     for (let n = 0; n < days; n += 1) {
